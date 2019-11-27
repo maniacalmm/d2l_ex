@@ -6,6 +6,19 @@ import sys
 npx.set_np()
 
 # accuracy is a valid concept only for classification
+# Defined in file: ./chapter_linear-networks/fashion-mnist.md
+def load_data_fashion_mnist(batch_size, resize=None):
+    """Download the Fashion-MNIST dataset and then load into memory."""
+    dataset = gluon.data.vision
+    trans = [dataset.transforms.Resize(resize)] if resize else []
+    trans.append(dataset.transforms.ToTensor())
+    trans = dataset.transforms.Compose(trans)
+    mnist_train = dataset.FashionMNIST(train=True).transform_first(trans)
+    mnist_test = dataset.FashionMNIST(train=False).transform_first(trans)
+    return (gluon.data.DataLoader(mnist_train, batch_size, shuffle=True,
+                                  num_workers=get_dataloader_workers()),
+            gluon.data.DataLoader(mnist_test, batch_size, shuffle=False,
+                                  num_workers=get_dataloader_workers()))
 
 
 def linreg(X, w, b):
@@ -164,31 +177,62 @@ class Timer:
         return sum(self.times)
 
 def train_ch5(net, train_iter, test_iter, num_epochs, lr, ctx=try_gpu()):
-    net.initialize(force_reinit=True, ctx=ctx, init=init.Normal())
-    # this is just for classification task
+    net.initialize(force_reinit=True, ctx=ctx, init=init.Xavier())
     loss = gluon.loss.SoftmaxCrossEntropyLoss()
-    trainer = gluon.Trainer(net.collect_params(), 'sgd', {'learning_rate': lr})
+    trainer = gluon.Trainer(net.collect_params(), 
+                            'adam', {'learning_rate': lr})
+
+
     timer = Timer()
     for epoch in range(num_epochs):
         metric = Accumulator(3)
         for i, (X, y) in enumerate(train_iter):
             timer.start()
+
             X, y = X.as_in_context(ctx), y.as_in_context(ctx)
             with autograd.record():
                 y_hat = net(X)
                 l = loss(y_hat, y)
             l.backward()
             trainer.step(X.shape[0])
-
             metric.add(l.sum(), accuracy(y_hat, y), X.shape[0])
             timer.stop()
             train_loss, train_acc = metric[0] / metric[2], metric[1] / metric[2]
-            if (i + 1) % 50 == 0:
-                print('i: {} ---- loss: {}, train_acc: {}'.format(i, train_loss, train_acc))
         test_acc = evaluate_accuracy_gpu(net, test_iter)
-        print('loss: {}, train_acc: {}, test_acc: {}'.format(train_loss, train_acc, test_acc))
+        print(epoch, " ---- train_loss: ", train_loss, " train_acc: ", train_acc)
     print("-------------------------")
     print('{} examples/sec on {}'.format(metric[2] * num_epochs/timer.sum(), ctx))
 
+# Defined in file: ./chapter_convolutional-neural-networks/lenet.md
+def train_ch5_o(net, train_iter, test_iter, num_epochs, lr, ctx=try_gpu()):
+    net.initialize(force_reinit=True, ctx=ctx, init=init.Xavier())
+    loss = gluon.loss.SoftmaxCrossEntropyLoss()
+    trainer = gluon.Trainer(net.collect_params(),
+                            'sgd', {'learning_rate': lr})
+    # animator = d2l.Animator(xlabel='epoch', xlim=[0,num_epochs],
+    #                         legend=['train loss','train acc','test acc'])
+    timer = Timer()
+    for epoch in range(num_epochs):
+        metric = Accumulator(3)  # train_loss, train_acc, num_examples
+        for i, (X, y) in enumerate(train_iter):
+            timer.start()
+            # Here is the only difference compared to train_epoch_ch3
+            X, y = X.as_in_context(ctx), y.as_in_context(ctx)
+            with autograd.record():
+                y_hat = net(X)
+                l = loss(y_hat, y)
+            l.backward()
+            trainer.step(X.shape[0])
+            metric.add(l.sum(), accuracy(y_hat, y), X.shape[0])
+            timer.stop()
+            train_loss, train_acc = metric[0]/metric[2], metric[1]/metric[2]
+            #     animator.add(epoch + i/len(train_iter),
+            #                  (train_loss, train_acc, None))
+        test_acc = evaluate_accuracy_gpu(net, test_iter)
+        print(epoch, " ---- train_loss: ", train_loss, " train_acc: ", train_acc)
+        # animator.add(epoch+1, (None, None, test_acc))
+    print('loss %.3f, train acc %.3f, test acc %.3f' % (
+        train_loss, train_acc, test_acc))
+    print('%.1f exampes/sec on %s'%(metric[2]*num_epochs/timer.sum(), ctx))
 
 
